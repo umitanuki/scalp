@@ -1,7 +1,5 @@
 import alpaca_trade_api as alpaca
-# import numpy as np
 import pandas as pd
-import time
 import asyncio
 
 import logging
@@ -9,13 +7,14 @@ import logging
 logger = logging.getLogger()
 
 
-class Algo:
+class ScalpAlgo:
 
     def __init__(self, api, symbol, lot):
         self._api = api
         self._symbol = symbol
         self._lot = lot
         self._bars = []
+        self._l = logger.getChild(self._symbol)
 
         now = pd.Timestamp.now(tz='America/New_York').floor('1min')
         market_open = now.replace(hour=9, minute=30)
@@ -26,12 +25,39 @@ class Algo:
         bars = data[market_open:]
         self._bars = bars
 
-        self._order = None
-        self._position = None
-        self._state = 'TO_BUY'
-        self._l = logger.getChild(self._symbol)
+        self._init_state()
 
-    def check_state(self, position):
+    def _init_state(self):
+        symbol = self._symbol
+        order = [o for o in self._api.list_orders() if o.symbol == symbol]
+        position = [p for p in self._api.list_positions()
+                    if p.symbol == symbol]
+        self._order = order[0] if len(order) > 0 else None
+        self._position = position[0] if len(position) > 0 else None
+        if self._position is not None:
+            if self._order is None:
+                self._state = 'TO_SELL'
+            else:
+                self._state = 'SELL_SUBMITTED'
+                if self._order.side != 'sell':
+                    self._l.warn(
+                        f'state {self._state} mismatch order {self._order}')
+        else:
+            if self._order is None:
+                self._state = 'TO_BUY'
+            else:
+                self._state = 'BUY_SUBMITTED'
+                if self._order.side != 'buy':
+                    self._l.warn(
+                        f'state {self._state} mismatch order {self._order}')
+
+    def _now(self):
+        return pd.Timestamp.now(tz='America/New_York')
+
+    def _outofmarket(self):
+        return self._now().time() >= pd.Timestamp('15:55').time()
+
+    def checkup(self, position):
         # self._l.info('periodic task')
         if self._state == 'BUY_SUBMITTED':
             if position:
@@ -48,6 +74,35 @@ class Algo:
             elif order.status in ('canceled', 'rejected'):
                 self._order = None
                 self._transition('TO_SELL')
+        elif self._state == 'TO_SELL':
+            self._submit_sell()
+
+        now = self._now()
+        order = self._order
+        if order is not None and now - \
+                order.submitted_at > pd.Timedelta('2 min'):
+            self._l.info('canceling stale order')
+            self._cancel_order()
+
+        if self._position is not None and self._outofmarket():
+            self._submit_sell(bailout=True)
+
+    def _cancel_order(self):
+        if self._order is not None:
+            self._api.cancel_order(self._order.id)
+
+    def _calc_buy_signal(self):
+        mavg = self._bars.rolling(20).mean().close.values
+        closes = self._bars.close.values
+        if closes[-2] < mavg[-2] and closes[-1] > mavg[-1]:
+            self._l.info(
+                f'buy signal: closes[-2] {closes[-2]} < mavg[-2] {mavg[-2]} '
+                f'closes[-1] {closes[-1]} > mavg[-1] {mavg[-1]}')
+            return True
+        else:
+            self._l.info(
+                f'closes[-2:] = {closes[-2:]}, mavg[-2:] = {mavg[-2:]}')
+            return False
 
     def on_bar(self, bar):
         self._bars = self._bars.append(pd.DataFrame({
@@ -62,17 +117,12 @@ class Algo:
             f'received bar start = {bar.start}, close = {bar.close}, len(bars) = {len(self._bars)}')
         if len(self._bars) < 21:
             return
+        if self._outofmarket():
+            return
         if self._state == 'TO_BUY':
-            mavg = self._bars.rolling(20).mean().close.values
-            closes = self._bars.close.values
-            if closes[-2] < mavg[-2] and closes[-1] > mavg[-1]:
-                self._l.info(
-                    f'buy signal: closes[-2] {closes[-2]} < mavg[-2] {mavg[-2]} '
-                    f'closes[-1] {closes[-1]} > mavg[-1] {mavg[-1]}')
+            signal = self._calc_buy_signal()
+            if signal:
                 self._submit_buy()
-            else:
-                self._l.info(
-                    f'closes[-2:] = {closes[-2:]}, mavg[-2:] = {mavg[-2:]}')
 
     def on_order_update(self, event, order):
         self._l.info(f'order update: {event} = {order}')
@@ -91,7 +141,7 @@ class Algo:
             self._position = self._api.get_position(self._symbol)
             self._order = self._api.get_order(order['id'])
             return
-        elif event == 'canceled' or event == 'rejected':
+        elif event in ('canceled', 'rejected'):
             if event == 'rejected':
                 self._l.warn(f'order rejected: current order = {self._order}')
             self._order = None
@@ -103,14 +153,9 @@ class Algo:
                     self._transition('TO_BUY')
             elif self._state == 'SELL_SUBMITTED':
                 self._transition('TO_SELL')
-                self._submit_sell()
+                self._submit_sell(bailout=True)
             else:
                 self._l.warn(f'unexpected state for {event}: {self._state}')
-        elif event == 'new':
-            o = self._api.get_order(order['id'])
-            time.sleep(0.5)
-            if o.status == 'filled':
-                self.on_order_update('fill', order)
 
     def _submit_buy(self):
         trade = self._api.polygon.last_trade(self._symbol)
@@ -133,28 +178,34 @@ class Algo:
         self._l.info(f'submitted buy {order}')
         self._transition('BUY_SUBMITTED')
 
-    def _submit_sell(self):
-        current_price = float(self._api.polygon.last_trade(self._symbol).price)
-        cost_basis = float(self._position.avg_entry_price)
-        limit_price = cost_basis + 0.01
-        if current_price > limit_price:
-            limit_price = current_price
-        try:
-            order = self._api.submit_order(
-                symbol=self._symbol,
-                side='sell',
+    def _submit_sell(self, bailout=False):
+        params = dict(
+            symbol=self._symbol,
+            side='sell',
+            qty=self._position.qty,
+            time_in_force='day',
+        )
+        if bailout:
+            params['type'] = 'market'
+        else:
+            current_price = float(
+                self._api.polygon.last_trade(
+                    self._symbol).price)
+            cost_basis = float(self._position.avg_entry_price)
+            limit_price = max(cost_basis + 0.01, current_price)
+            params.update(dict(
                 type='limit',
-                qty=self._position.qty,
-                time_in_force='day',
                 limit_price=limit_price,
-            )
-            self._l.info(f'submitted sell {order}')
+            ))
+        try:
+            order = self._api.submit_order(**params)
         except Exception as e:
             self._l.error(e)
             self._transition('TO_SELL')
             return
 
         self._order = order
+        self._l.info(f'submitted sell {order}')
         self._transition('SELL_SUBMITTED')
 
     def _transition(self, new_state):
@@ -169,23 +220,13 @@ def main(args):
     fleet = {}
     symbols = args.symbols
     for symbol in symbols:
-        algo = Algo(api, symbol, lot=args.lot)
+        algo = ScalpAlgo(api, symbol, lot=args.lot)
         fleet[symbol] = algo
 
     @stream.on(r'^AM')
     async def on_bars(conn, channel, data):
-        # append to bar list
-        # calculate MA20
-        # MA cross over, buy alotted amount with limit=last_trade
-        # wait for 30 seconds, cancel if not filled.
-        # if filled, set limit sell at next cent.
-        #
         if data.symbol in fleet:
             fleet[data.symbol].on_bar(data)
-
-    @stream.on(r'^T$')
-    async def on_trades(conn, channel, data):
-        pass
 
     @stream.on(r'trade_updates')
     async def on_trade_updates(conn, channel, data):
@@ -196,16 +237,15 @@ def main(args):
 
     async def periodic():
         while True:
-            await asyncio.sleep(1)
+            await asyncio.sleep(5)
             positions = api.list_positions()
             for symbol, algo in fleet.items():
                 pos = [p for p in positions if p.symbol == symbol]
-                algo.check_state(pos[0] if len(pos) > 0 else None)
+                algo.checkup(pos[0] if len(pos) > 0 else None)
     channels = ['trade_updates'] + [
         'AM.' + symbol for symbol in symbols
     ]
 
-    # stream.run(channels)
     loop = stream.loop
     loop.run_until_complete(asyncio.gather(
         stream.subscribe(channels),
