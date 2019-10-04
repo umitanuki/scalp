@@ -11,9 +11,10 @@ logger = logging.getLogger()
 
 class Algo:
 
-    def __init__(self, api, symbol):
+    def __init__(self, api, symbol, lot):
         self._api = api
         self._symbol = symbol
+        self._lot = lot
         self._bars = []
 
         now = pd.Timestamp.now(tz='America/New_York').floor('1min')
@@ -90,7 +91,7 @@ class Algo:
             self._position = self._api.get_position(self._symbol)
             self._order = self._api.get_order(order['id'])
             return
-        elif event == 'canceled' or 'rejected':
+        elif event == 'canceled' or event == 'rejected':
             if event == 'rejected':
                 self._l.warn(f'order rejected: current order = {self._order}')
             self._order = None
@@ -113,7 +114,7 @@ class Algo:
 
     def _submit_buy(self):
         trade = self._api.polygon.last_trade(self._symbol)
-        amount = int(5000 / trade.price)
+        amount = int(self._lot / trade.price)
         try:
             order = self._api.submit_order(
                 symbol=self._symbol,
@@ -168,7 +169,7 @@ def main(args):
     fleet = {}
     symbols = args.symbols
     for symbol in symbols:
-        algo = Algo(api, symbol)
+        algo = Algo(api, symbol, lot=args.lot)
         fleet[symbol] = algo
 
     @stream.on(r'^AM')
@@ -191,7 +192,7 @@ def main(args):
         logger.info(f'trade_updates {data}')
         symbol = data.order['symbol']
         if symbol in fleet:
-            fleet[symbol].on_order_update(data)
+            fleet[symbol].on_order_update(data.event, data.order)
 
     async def periodic():
         while True:
@@ -216,7 +217,7 @@ def main(args):
 if __name__ == '__main__':
     import argparse
 
-    fmt = '%(asctime)s:%(filename)s:%(lineno)d:%(levelname)s:%(message)s'
+    fmt = '%(asctime)s:%(filename)s:%(lineno)d:%(levelname)s:%(name)s:%(message)s'
     logging.basicConfig(level=logging.INFO, format=fmt)
     fh = logging.FileHandler('console.log')
     fh.setLevel(logging.INFO)
@@ -225,5 +226,6 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('symbols', nargs='+')
+    parser.add_argument('--lot', type=float, default=2000)
 
     main(parser.parse_args())
