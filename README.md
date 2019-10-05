@@ -91,14 +91,15 @@ Orders may be canceled or rejected (caused by this script or you manually cancel
 from the dashboard). In these cases, the state transitions to `TO_BUY` (if not holding
 a position) or `TO_SELL` (if holding a position) and wait for the next events.
 
-Each algo instance owns its child logger, prefixed by the symbol name. The console
-log is also emitted to a file `console.log` under the same directory for your later review.
+`checkup()` method is the background periodic job to check several conditions, where
+we cancel open orders and sends market sell order if there is an open position.
 
-### Cleanup
-The algo instance cancels open orders and sends market sell order if there is an open position.
 It exits once the market closes.
 
 ### Note
+Each algo instance owns its child logger, prefixed by the symbol name. The console
+log is also emitted to a file `console.log` under the same directory for your later review.
+
 Again, the beautify of this code is that there is no multithread code but each
 algo instance can focus on the bar/order/position data only for its own. It still
 handles multiple symbols concurrently plus runs background periodic job in the
