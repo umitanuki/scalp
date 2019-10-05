@@ -2,13 +2,16 @@
 
 This python script is a working example to execute scalping trading algorithm for
 [Alpaca API](https://alpaca.markets). This algorithm uses real time order updates
-as well as minute level bar streaming from Polygon via Websockets.
+as well as minute level bar streaming from Polygon via Websockets (see
+[document](https://docs.alpaca.markets/market-data/#consolidated-market-data) for
+Polygon data access).
 One of the contributions of this example is to demonstrate how to handle
 multiple stocks concurrently as independent routine using Python's asyncio.
 
 The strategy holds positions up to 2 minute and exits positions quickly, so
 you have to have more than $25k equity in your account due to the Pattern Day Trader rule,
-to run this example.
+to run this example. For more information about PDT rule, please read the
+[document](https://docs.alpaca.markets/user-protections/#the-rule).
 
 ## Dependency
 This script needs latest [Alpaca Python SDK](https://github.com/alpacahq/alpaca-trade-api-python).
