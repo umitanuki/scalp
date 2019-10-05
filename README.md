@@ -104,3 +104,17 @@ Again, the beautify of this code is that there is no multithread code but each
 algo instance can focus on the bar/order/position data only for its own. It still
 handles multiple symbols concurrently plus runs background periodic job in the
 same async loop.
+
+The trick to run additional async routine is as follows.
+
+```
+    loop = stream.loop
+    loop.run_until_complete(asyncio.gather(
+        stream.subscribe(channels),
+        periodic(),
+    ))
+    loop.close()
+```
+
+We use `asyncio.gather()` to run all bar handler, order update handler and periodic job
+in one async loop indifinitely. You can kill it by `Ctrl+C`.
