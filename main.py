@@ -1,6 +1,7 @@
 import alpaca_trade_api as alpaca
-import pandas as pd
 import asyncio
+import pandas as pd
+import sys
 
 import logging
 
@@ -59,23 +60,6 @@ class ScalpAlgo:
 
     def checkup(self, position):
         # self._l.info('periodic task')
-        if self._state == 'BUY_SUBMITTED':
-            if position:
-                # order filled
-                self._position = position
-                self._transition('TO_SELL')
-                self._submit_sell()
-        elif self._state == 'SELL_SUBMITTED':
-            order = self._api.get_order(self._order.id)
-            if order.status == 'filled':
-                self._order = None
-                self._position = None
-                self._transition('TO_BUY')
-            elif order.status in ('canceled', 'rejected'):
-                self._order = None
-                self._transition('TO_SELL')
-        elif self._state == 'TO_SELL':
-            self._submit_sell()
 
         now = self._now()
         order = self._order
@@ -241,7 +225,10 @@ def main(args):
 
     async def periodic():
         while True:
-            await asyncio.sleep(5)
+            if not api.get_clock().is_open:
+                logger.info('exit as market is not open')
+                sys.exit(0)
+            await asyncio.sleep(30)
             positions = api.list_positions()
             for symbol, algo in fleet.items():
                 pos = [p for p in positions if p.symbol == symbol]
