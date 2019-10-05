@@ -2,7 +2,7 @@
 
 This python script is a working example to execute scalping trading algorithm for
 [Alpaca API](https://alpaca.markets). This algorithm uses real time order updates
-as well as minute level bar streaming from Polygon via Websockets (see
+as well as minute level bar streaming from Polygon via Websockets (see the
 [document](https://docs.alpaca.markets/market-data/#consolidated-market-data) for
 Polygon data access).
 One of the contributions of this example is to demonstrate how to handle
