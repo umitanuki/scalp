@@ -8,7 +8,7 @@ Polygon data access).
 One of the contributions of this example is to demonstrate how to handle
 multiple stocks concurrently as independent routine using Python's asyncio.
 
-The strategy holds positions up to 2 minute and exits positions quickly, so
+The strategy holds positions for very short period and exits positions quickly, so
 you have to have more than $25k equity in your account due to the Pattern Day Trader rule,
 to run this example. For more information about PDT rule, please read the
 [document](https://docs.alpaca.markets/user-protections/#the-rule).
