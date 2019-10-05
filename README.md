@@ -118,3 +118,18 @@ The trick to run additional async routine is as follows.
 
 We use `asyncio.gather()` to run all bar handler, order update handler and periodic job
 in one async loop indifinitely. You can kill it by `Ctrl+C`.
+
+### Customization
+Instead of using this buy signal of 20 minute simple moving average cross over, you can
+use your own buy signal. To do so, extend the `ScalpAlgo` class and write your own
+`_calc_buy_signal()` method.
+
+```py
+    class MyScalpAlgo(ScalpAlgo):
+        def _calculate_buy_signal(self):
+            '''self._bars has all minute bars in the session so far. Return True to
+            trigger buy order'''
+            pass
+```
+
+And use it instead of the original class.
