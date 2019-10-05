@@ -107,7 +107,7 @@ same async loop.
 
 The trick to run additional async routine is as follows.
 
-```
+```py
     loop = stream.loop
     loop.run_until_complete(asyncio.gather(
         stream.subscribe(channels),
