@@ -79,9 +79,13 @@ class ScalpAlgo:
 
         now = self._now()
         order = self._order
-        if order is not None and now - \
-                order.submitted_at > pd.Timedelta('2 min'):
-            self._l.info('canceling stale order')
+        if (order is not None and
+            order.side == 'buy' and now -
+                order.submitted_at > pd.Timedelta('2 min')):
+            last_price = self._api.polygon.last_trade(self._symbol).price
+            self._l.info(
+                f'canceling missed buy order {order.id} at {order.limit_price} '
+                f'(current price = {last_price})')
             self._cancel_order()
 
         if self._position is not None and self._outofmarket():
